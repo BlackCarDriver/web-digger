@@ -2,13 +2,10 @@ package digger
 
 import(
 	"fmt"
-	"bytes"
-	"io"
 	"io/ioutil"
 	"net/http"
-	"os"
 	"regexp"
-	"strings"
+
 )
 
 const(
@@ -20,6 +17,7 @@ var (
 	source_path string
 )
 
+//init config values
 func init(){
 	conf ,err := NewConfig(config_path)
 	if err != nil {
@@ -31,28 +29,35 @@ func init(){
 
 
 func Test(){
-	url := "https://imgsa.baidu.com/forum/pic/item/8a13632762d0f703c25d6d2306fa513d2797c566.jpg"
-	err := downLoadImages(url)
-	fmt.Println(err)
+	url := `https://tieba.baidu.com/f?kw=%E6%9D%8E%E6%AF%85`;
+	DigUrl(url)
 }
 
-func downLoadImages(imgUrl string)error{
-	if !isImgUrl(imgUrl) {
-		return fmt.Errorf("%s is not match an imgUrl !", imgUrl)
+
+
+//visit an url and do somthing through the html text
+func DigUrl(targetUrl string) error{
+	resp, err := http.Get(targetUrl)
+	if err != nil {
+		return err
 	}
-	tmp := strings.LastIndex(imgUrl, `/`)
-	imgName := imgUrl[tmp:]
-	resp, _ := http.Get(imgUrl)
 	body, _ := ioutil.ReadAll(resp.Body)
-	imgPath := fmt.Sprint(source_path, os.PathSeparator, imgName)
-	out, _ := os.Create(imgPath)
-	io.Copy(out, bytes.NewReader(body))
+	html := string(body)
+	//get all img url from html code
+	reg1, _ := regexp.Compile(`<img [^>]*>`) 
+	imgTags := reg1.FindAllString(html, -1)
+	imgSlice := make([]string,0)
+	for _,j := range imgTags {
+		imgSlice = append(imgSlice, getImgSlice(j)...) 
+	}
+	for _,j := range imgSlice {
+		err := downLoadImages(j)
+		if err != nil {
+			fmt.Println(j , " : ", err)
+		}else{
+			fmt.Printf("0")
+		}
+	}
 	return nil
 }
 
-//judge if a url is a link to an images
-func isImgUrl(imgUrl string) bool {
-	reg,_:= regexp.Compile(`^http[s]?.*.(jpg|png|jpeg|gif|ico)$`) 
-	imgUrl = strings.ToLower(imgUrl)
-	return reg.MatchString(imgUrl) 
-}
