@@ -13,6 +13,17 @@ import(
 	"time"
 )
 
+func imgDownLoader(no int, urlChan <-chan string , resChan chan<- bool){
+	for url := range urlChan {
+		res := downLoadImages(url)
+		if res == nil{
+			resChan<-true
+		}else{
+			resChan<-false
+		}
+	}
+}
+
 //download an image from imgurl
 func downLoadImages(imgUrl string)error{
 	if !isImgUrl(imgUrl) {
