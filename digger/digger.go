@@ -6,38 +6,69 @@ import(
 	"net/http"
 	"regexp"
 	"sync"
+	"math/rand"
+	"time"
+	"os"
 )
 
 const(
 	config_path = "./config/"
 )
+var (
+	randMachine *rand.Rand
+	getNameMutex  *sync.Mutex
+	updataSizeMutex *sync.Mutex
+	shutdownsign	 chan os.Signal
+	goingToStop		bool
+	imgNumbers int		//how many images already download
+	totalImgbytes uint64		//the total size of all images already download
+)
 
+//config values
 var (
 	source_path string
 	thread_numbers int
 	url_seed	string
-	target_url string
+	min_img_kb int
+	max_img_mb int
+	max_occupy_mb int
 )
 
 //init config values
 func init(){
+	imgNumbers = 0
+	totalImgbytes = 0
+	goingToStop = false
+	shutdownsign = make(chan os.Signal, 10)
+	ns := rand.NewSource(time.Now().UnixNano())
+	randMachine = rand.New(ns)
+	getNameMutex = &sync.Mutex{}
+	updataSizeMutex = &sync.Mutex{}
+
 	conf ,err := NewConfig(config_path)
 	if err != nil {
 		panic(err)
 	} 
 	conf.Register("source_path", "", true)
-	conf.Register("thread_numbers", 0, true)
 	conf.Register("url_seed", "", true )
+	conf.Register("thread_numbers", 1, false)
+	conf.Register("min_img_kb", 1, false)
+	conf.Register("max_img_mb", 10, false)
+	conf.Register("max_occupy_mb",1000, false)
 	source_path, _ = conf.GetString("source_path")
 	thread_numbers,_ = conf.GetInt("thread_numbers")
 	url_seed,_ = conf.GetString("url_seed")
+	min_img_kb, _ = conf.GetInt("min_img_kb")
+	max_img_mb, _ = conf.GetInt("max_img_mb")
+	max_occupy_mb, _ = conf.GetInt("max_occupy_mb")
+	//conf. Display()
 }
 
 
 func Test(){
+	go destructor()
 	DigUrl(url_seed)
 }
-
 
 
 //visit an url and do somthing through the html text
@@ -54,17 +85,17 @@ func DigUrl(targetUrl string) error{
 	imgTags := reg1.FindAllString(html, -1)
 	imgSlice := make([]string,0)
 	for _,j := range imgTags {
-		imgSlice = append(imgSlice, getImgSlice(j)...) 
+		imgSlice = append(imgSlice, getImgSlice(j, targetUrl)...) 
 	}
 
 	//create some imgages download workers
 	fmt.Println("   images numbers: ", len(imgSlice))
 	urlChan := make(chan string, 100)
-	resChan := make(chan bool, 20)
+	resChan := make(chan int, 20)
 	for i:=0; i<thread_numbers; i++ {
 		go imgDownLoader(i, urlChan, resChan)
 	}
-
+	
 	//distribute the work to downloaders
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -72,6 +103,7 @@ func DigUrl(targetUrl string) error{
 	for _,j := range imgSlice {
 		urlChan <- j
 	}
+
 	wg.Wait()
 	close(urlChan)
 	close(resChan)
@@ -81,19 +113,31 @@ func DigUrl(targetUrl string) error{
 
 
 //display the result of work goroutine
-func showResult(times int, res <-chan bool, wg *sync.WaitGroup){
+func showResult(times int, res <-chan int, wg *sync.WaitGroup){
 	counter := 0
-	for tmp :=  range res {
+	for tres :=  range res {
 		counter ++
-		if tmp {
-			fmt.Print("0")
-		}else{
-			fmt.Print("1")
-		}
+		fmt.Print(tres)
 		if counter == times {
 			fmt.Println(" \n the work is complete !")
 			wg.Done()
 			return
 		}
+		if (counter%50) == 0 {
+			fmt.Println()
+		}
 	}
+}
+
+//giving a little time to downloaders before shut down the program 
+func destructor(){
+	<-shutdownsign
+	goingToStop = true
+	go func(){
+		for {
+			<-shutdownsign
+		}
+	}()
+	time.Sleep(time.Second * 10)
+	os.Exit(1)
 }

@@ -135,14 +135,11 @@ func (c *Config) Register(confName string, dfValue interface{}, isStrict bool){
 
 //display the key name and value name in rawMap and ripeMap
 func (c *Config) Display(){
-	fmt.Println("============= rawConf ======== ")
-	for k,v := range c.rawConf {
-	 	fmt.Printf(" %v -->  %v \n", k,v)
-	}
-	fmt.Println( "============ ripefMap ========" )
+	fmt.Println( "the following configs is using :" )
 	for k,v := range c.ripeConf {
-		fmt.Printf(" %v -->  %v \n", k,v)
+		fmt.Printf(" %-15v  --->  %v \n", k,v)
 	}
+	fmt.Println()
 }
 
 //called by other GetXXX functions
