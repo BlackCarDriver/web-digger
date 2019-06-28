@@ -31,7 +31,6 @@ func downLoadImages(imgUrl string)int{
 	if !isImgUrl(imgUrl) {
 		return 1
 	}
-	imgName := getName(imgUrl)
 	resp, err := http.Get(imgUrl)
 	if err != nil{
 		return 2
@@ -50,6 +49,7 @@ func downLoadImages(imgUrl string)int{
 	if imgSize > max_img_mb * 1048576{
 		return 6
 	}
+	imgName := getName(imgUrl)
 	go updateTotalSize(uint64(imgSize))
 	imgPath := fmt.Sprint(source_path, string(os.PathSeparator), imgName)
 	out, err := os.Create(imgPath)
@@ -104,3 +104,63 @@ func updateTotalSize(addBytes uint64){
 	updataSizeMutex.Unlock()
 }
 
+
+//extract the url from a tag
+func getHref(aTag string, basehref string)string{
+	hrefReg,_ := regexp.Compile(`href="[^"]*`)
+	url := hrefReg.FindString(aTag)
+	if len(url)<7 {
+		return ""
+	}
+	url = url[6:]
+	if len(url) < 5 {
+		return ""
+	}
+	if strings.HasPrefix(url, "http"){
+		return strings.TrimRight(url, `/`)
+	}
+	if strings.HasPrefix(url, `//`) {
+		url = `http:` + url
+	}else {
+		tindex := strings.Index(basehref, "?")
+		if tindex > 0 {
+			basehref = basehref[:tindex]
+		}
+		tindex = strings.LastIndex(basehref,`/`)
+		if tindex > 0 {
+			basehref = basehref[:tindex]
+			basehref = strings.TrimRight(basehref, `/`)
+		}
+		url = basehref + url
+	}
+	url = strings.TrimRight(url, `/`)
+	return url
+}
+
+//check if the url can be used or not
+func canUse(url string) bool{
+	if !strings.HasPrefix(url, "http") {
+		return false
+	}
+	if url_prefix != "" && !strings.HasPrefix(url, url_prefix){
+		return false
+	}
+	if url_must_contain != "" && strings.Index(url, url_must_contain)<0 {
+		return false
+	}
+	identi := getUrlPath(url)
+	if url_map[identi] {
+		return false
+	}else{
+		url_map[identi] = true
+	}
+	return true
+}
+
+//avoid visit a same path with different url
+func getUrlPath(url string) string{
+	tindex := strings.Index(url, ":")
+	url = url[tindex+1:]
+	url = strings.Trim(url, `/`)
+	return url
+}
