@@ -55,6 +55,7 @@ func downLoadImages(imgUrl string)int{
 	out, err := os.Create(imgPath)
 	defer out.Close()
 	if err != nil {
+		errLog.Printf("%s  ---->  %v \n", imgPath, err)
 		return 7
 	}
 	_, err = io.Copy(out, bytes.NewReader(body))
@@ -130,6 +131,9 @@ func getHref(aTag string, basehref string)string{
 		if tindex > 0 {
 			basehref = basehref[:tindex]
 			basehref = strings.TrimRight(basehref, `/`)
+		}
+		if url[0] != '/' {
+			url = "/" +url
 		}
 		url = basehref + url
 	}

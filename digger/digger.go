@@ -9,7 +9,9 @@ import(
 	"math/rand"
 	"time"
 	"os"
+	"strings"
 	"container/list"
+	"log"
 )
 
 const(
@@ -23,6 +25,8 @@ var (
 	updataSizeMutex *sync.Mutex
 	mainClient		http.Client
 	shutdownsign	chan os.Signal
+	urlLog			*log.Logger
+	errLog			*log.Logger
 	url_list		[]string	
 	goingToStop		bool
 	imgNumbers int		//how many images already download
@@ -35,6 +39,7 @@ var (
 //config values
 var (
 	source_path string
+	log_path	string
 	thread_numbers int
 	url_seed	string
 	min_img_kb int
@@ -65,6 +70,7 @@ func init(){
 		panic(err)
 	} 
 	conf.Register("source_path", "", false)
+	conf.Register("log_path", "", false)
 	conf.Register("url_seed", "https://tieba.baidu.com", false )
 	conf.Register("thread_numbers", 1, false)
 	conf.Register("min_img_kb", 1, false)
@@ -78,6 +84,7 @@ func init(){
 	conf.Register("max_wait_time_s", 10, false)
 	conf.Register("sleep_time_s", 0, false)
 	source_path, _ = conf.GetString("source_path")
+	log_path, _ = conf.GetString("log_path")
 	thread_numbers,_ = conf.GetInt("thread_numbers")
 	url_seed,_ = conf.GetString("url_seed")
 	min_img_kb, _ = conf.GetInt("min_img_kb")
@@ -96,6 +103,16 @@ func init(){
 	mainClient = http.Client{
 		Timeout : time.Second * time.Duration(max_wait_time_s),
 	}
+
+	//init logger
+	log_path = strings.TrimRight(log_path, `\`)
+	logfp, err := os.Create(log_path + `\urlQueue.log`)
+	if err!=nil {
+		panic(err)
+	}
+	logfp2, _ := os.Create(log_path + `\error.log`)
+	urlLog = log.New(logfp, "", 0)
+	errLog = log.New(logfp2, "", 0)
 }
 
 
@@ -128,11 +145,9 @@ func Test(){
 	}
 }
 
-
 //visit an url and do somthing through the html text
 func DigUrl(targetUrl string) error{
-	fmt.Printf("Begin to analyze %s :     ", targetUrl)
-	//fmt.Println(targetUrl)
+	fmt.Printf("url         [  %s  ]\n", targetUrl)
 	resp, err := mainClient.Get(targetUrl)
 	if err != nil {
 		fmt.Println(targetUrl, "----------->" ,err)
@@ -140,22 +155,25 @@ func DigUrl(targetUrl string) error{
 	}
 	body, _ := ioutil.ReadAll(resp.Body)
 	html := string(body)
-	//fmt.Println(html)
-	//return nil
+	
+
 	//extract href from html and push then into map and queue
 	aReg,_ := regexp.Compile(`<a [^>]*>`)
 	aTags := aReg.FindAllString(html, -1)
+	fmt.Printf("<a>         [  %-6d  ]\n", len(aTags))
+	useLink := 0
 	for _,j := range aTags {
 		aurl := getHref(j, targetUrl)
-		//fmt.Println("####### ", aurl)
 		if !canUse(aurl) {
+			errLog.Println(aurl)
 			continue
 		}
-		//fmt.Println("inqueue  ------------>  ", aurl)
+		urlLog.Printf("%d ---> %s", mylist.Len(), aurl)
 		mylist.PushBack(aurl)
+		useLink ++
 	}
+	fmt.Printf("<a>+        [  %-6d  ]\n", useLink)
 	
-	//return nil
 	//get all img url from html code and colloct into a slice
 	reg1, _ := regexp.Compile(`<img [^>]*>`) 
 	imgTags := reg1.FindAllString(html, -1)
@@ -163,9 +181,9 @@ func DigUrl(targetUrl string) error{
 	for _,j := range imgTags {
 		imgSlice = append(imgSlice, getImgSlice(j, targetUrl)...) 
 	}
-
-	//create some imgages download workers
-	fmt.Println("   images numbers: ", len(imgSlice))
+	fmt.Printf("<img>       [  %-6d  ]\n", len(imgSlice))
+	
+	//create some goroutine and distribute the workes
 	if len(imgSlice) == 0 {
 		return nil
 	}
@@ -174,8 +192,6 @@ func DigUrl(targetUrl string) error{
 	for i:=0; i<thread_numbers; i++ {
 		go imgDownLoader(i, urlChan, resChan)
 	}
-	
-	//distribute the work to downloaders
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go showResult(len(imgSlice), resChan, &wg)
@@ -183,26 +199,25 @@ func DigUrl(targetUrl string) error{
 		urlChan <- j
 	}
 
+	//wait for images download
 	wg.Wait()
 	close(urlChan)
 	close(resChan)
-
 	return nil
 }
-
 
 //display the result of work goroutine
 func showResult(times int, res <-chan int, wg *sync.WaitGroup){
 	counter := 0
 	for tres :=  range res {
 		counter ++
-		fmt.Print(tres)
+		fmt.Print(tres," ")
 		if counter == times {
-			fmt.Println(" \n the work is complete !")
+			fmt.Printf("\n urlQue length now is %d , it is the %d pages \n\n\n", mylist.Len(), pagesNumber )
 			wg.Done()
 			return
 		}
-		if (counter%100) == 0 {
+		if (counter%50) == 0 {
 			fmt.Println()
 		}
 	}
