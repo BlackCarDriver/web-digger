@@ -12,6 +12,7 @@ import(
 	"strings"
 	"container/list"
 	"log"
+	"syscall"
 )
 
 const(
@@ -49,6 +50,7 @@ var (
 	travel_method string
 	url_prefix	string
 	url_must_contain string
+	url_nextpage string
 	max_wait_time_s int
 	sleep_time_s	int
 )
@@ -61,6 +63,7 @@ func init(){
 	shutdownsign = make(chan os.Signal, 10)
 	url_map = make(map[string]bool)
 	ns := rand.NewSource(time.Now().UnixNano())
+	mylist = list.New()
 	randMachine = rand.New(ns)
 	getNameMutex = &sync.Mutex{}
 	updataSizeMutex = &sync.Mutex{}
@@ -83,6 +86,7 @@ func init(){
 	conf.Register("url_must_contain", "", false)
 	conf.Register("max_wait_time_s", 10, false)
 	conf.Register("sleep_time_s", 0, false)
+	conf.Register("url_nextpage", "", false)
 	source_path, _ = conf.GetString("source_path")
 	log_path, _ = conf.GetString("log_path")
 	thread_numbers,_ = conf.GetInt("thread_numbers")
@@ -94,10 +98,10 @@ func init(){
 	max_pages_number, _ = conf.GetInt("max_pages_number")
 	url_list, _ = conf.GetStrings("url_list")
 	url_prefix, _ = conf.GetString("url_prefix")
+	url_nextpage, _  = conf.GetString("url_nextpage")
 	url_must_contain, _ = conf.GetString("url_must_contain")
 	max_wait_time_s, _ = conf.GetInt("max_wait_time_s")
 	sleep_time_s,_ = conf.GetInt("sleep_time_s")
-
 	//conf.display()
 
 	mainClient = http.Client{
@@ -118,75 +122,131 @@ func init(){
 
 func Test(){
 	go destructor()
+
 	switch travel_method {
+	case "test":
+		digAndSaveImgs(url_seed)
+
 	case "list":
 		for _,url := range url_list{
-			DigUrl(url)
+			pagesNumber ++
+			digAndSaveImgs(url)
 		}
 
-	case "bfs":
-		mylist = list.New()
-		mylist.PushBack(url_seed)
-		for url:=mylist.Front(); url!=nil ; url=url.Next() {
-			urlstr := url.Value.(string)
-			if pagesNumber >= max_pages_number{
-				break
-			}
-			if goingToStop {
-				break
-			}
-			pagesNumber ++
-			DigUrl(urlstr)
-			time.Sleep(time.Second * time.Duration(sleep_time_s))
-		}
+	case "bfd":	
+		bfDig(url_seed)
 
 	case "dfs":
-		DigUrl(url_seed)
+		break
+
+	case "forward":
+		basehref := `http://pic.netbian.com/tupian/%d.html`
+		startIndx := 14335
+		endIndex :=  24335
+		for i:= startIndx; i<=endIndex; i++ {
+			tmpUrl := fmt.Sprintf(basehref, i)
+			digAndSaveImgs(tmpUrl)
+		}  
+	}
+
+	shutdownsign <-syscall.Signal(2)
+	time.Sleep(time.Second * 60)
+}
+
+// breadth first dig
+func bfDig(seed string){
+	mylist.PushBack(url_seed)
+	for url:=mylist.Front(); url!=nil ; url=url.Next() {
+		if 	url.Prev() != nil {
+			mylist.Remove(url.Prev())
+		}
+		if pagesNumber >= max_pages_number{
+			break
+		}
+		if goingToStop {
+			break
+		}
+		turl := url.Value.(string)		//going to dig it url
+		allATags := digAtags( turl )
+		for _, atag := range allATags {
+			//extrat url and check whether can be used
+			href := getHref(atag, turl)
+			if !canUse(href) {
+				if href != ""{
+					errLog.Println(href)
+				}
+				continue
+			}
+			//check which type it href is and do something
+			if isNextPage(atag){
+				mylist.PushBack(href)
+				urlLog.Printf("%d ---> %s", mylist.Len(), href)
+				continue
+			}
+			if isContain(atag) {
+				digAndSaveImgs(href)
+				pagesNumber ++
+				time.Sleep(time.Second * time.Duration(sleep_time_s))
+			}
+		} 
 	}
 }
 
-//visit an url and do somthing through the html text
-func DigUrl(targetUrl string) error{
-	fmt.Printf("url         [  %s  ]\n", targetUrl)
-	resp, err := mainClient.Get(targetUrl)
+
+//judge if a <a/> element have substring url_nextpage
+func isNextPage(atag string) bool {
+	if url_nextpage == "" {
+		return false
+	}
+	if strings.Index(atag, url_nextpage) < 0  {
+		return false
+	}
+	return true
+}
+//judge if a <a/> element have substring url_must_contain
+func isContain(atag string) bool {
+	if url_must_contain == "" {
+		return true
+	}
+	if strings.Index(atag, url_must_contain) < 0  {
+		return false
+	}
+	return true
+}
+
+//visit an url and get the html code
+func digHtml(url string)(html string, err error){
+	resp, err := mainClient.Get(url)
 	if err != nil {
-		fmt.Println(targetUrl, "----------->" ,err)
-		return err
+		return "",err
 	}
 	body, _ := ioutil.ReadAll(resp.Body)
-	html := string(body)
-	
+	html = string(body)
+	return html, err
+}
 
-	//extract href from html and push then into map and queue
-	aReg,_ := regexp.Compile(`<a [^>]*>`)
-	aTags := aReg.FindAllString(html, -1)
-	fmt.Printf("<a>         [  %-6d  ]\n", len(aTags))
-	useLink := 0
-	for _,j := range aTags {
-		aurl := getHref(j, targetUrl)
-		if !canUse(aurl) {
-			errLog.Println(aurl)
-			continue
-		}
-		urlLog.Printf("%d ---> %s", mylist.Len(), aurl)
-		mylist.PushBack(aurl)
-		useLink ++
+//find img url from html code and download some of then according to the config 
+func digAndSaveImgs(url string) {
+	//get all img link from html code
+	html,err := digHtml(url)
+	if err != nil {
+		fmt.Println(err)
+		fmt.Println()
 	}
-	fmt.Printf("<a>+        [  %-6d  ]\n", useLink)
-	
-	//get all img url from html code and colloct into a slice
 	reg1, _ := regexp.Compile(`<img [^>]*>`) 
 	imgTags := reg1.FindAllString(html, -1)
 	imgSlice := make([]string,0)
 	for _,j := range imgTags {
-		imgSlice = append(imgSlice, getImgSlice(j, targetUrl)...) 
+		imgSlice = append(imgSlice, getImgSlice(j, url)...) 
 	}
-	fmt.Printf("<img>       [  %-6d  ]\n", len(imgSlice))
-	
-	//create some goroutine and distribute the workes
 	if len(imgSlice) == 0 {
-		return nil
+		return
 	}
+	
+	fmt.Printf("url     [  %s  ]\n", url)
+	fmt.Printf("<img>   [  %-6d  ]\n", len(imgSlice))
+		
+	//create some goroutine and distribute the workes
 	urlChan := make(chan string, 100)
 	resChan := make(chan int, 20)
 	for i:=0; i<thread_numbers; i++ {
@@ -195,25 +255,25 @@ func DigUrl(targetUrl string) error{
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go showResult(len(imgSlice), resChan, &wg)
-	for _,j := range imgSlice {
+	for _,j := range imgSlice {		//begin to download images
 		urlChan <- j
 	}
-
-	//wait for images download
+	//wait for images download complete
 	wg.Wait()
 	close(urlChan)
 	close(resChan)
-	return nil
 }
 
-//display the result of work goroutine
+//display the result of images download goroutine
+//called by digAndSaveImgs()
 func showResult(times int, res <-chan int, wg *sync.WaitGroup){
 	counter := 0
 	for tres :=  range res {
 		counter ++
 		fmt.Print(tres," ")
 		if counter == times {
-			fmt.Printf("\n urlQue length now is %d , it is the %d pages \n\n\n", mylist.Len(), pagesNumber )
+			fmt.Println()
+			fmt.Printf("QueLen [ %-6d]    Pages [ %-6d]    ImgNum [ %-6d]    ImgSize [ %-6d]  \n\n\n", mylist.Len(), pagesNumber, imgNumbers, totalImgbytes/1048576 )
 			wg.Done()
 			return
 		}
@@ -222,6 +282,40 @@ func showResult(times int, res <-chan int, wg *sync.WaitGroup){
 		}
 	}
 }
+
+func digAtags(url string)[]string{
+	html, err := digHtml(url)
+	if err!=nil {
+		fmt.Println(err)
+		return make([]string, 0)
+	}
+	//extract  <a/> tag from html code
+	aReg,_ := regexp.Compile(`<a [^>]*>`)
+	return aReg.FindAllString(html, -1)
+}
+
+//dig all can_be_used_url from an html text according to the config
+func DigUrl(url string) []string {
+	//get a tag text from html code
+	aTags := digAtags(url)
+	newUrls := make([]string, 0)
+	if len(aTags)==0 {
+		return newUrls
+	}
+	//extract usefully url from <a/>
+	for _, a := range aTags {
+		aurl := getHref(a, url)
+		if !canUse(aurl) { 	//synax not right or already meet before or out of basehref
+			if aurl != "" {
+				errLog.Println(aurl)
+			}		
+			continue
+		}
+		newUrls = append(newUrls, aurl)
+	}
+	return newUrls
+} 
+
 
 //giving a little time to downloaders before shut down the program 
 func destructor(){
@@ -233,6 +327,8 @@ func destructor(){
 		}
 	}()
 	time.Sleep(time.Second * 10)
+	fmt.Println("The program is stop down safely ....")
+	time.Sleep(time.Second)
 	os.Exit(1)
 }
 

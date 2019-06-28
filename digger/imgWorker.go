@@ -17,10 +17,11 @@ import(
 
 func imgDownLoader(no int, urlChan <-chan string , resChan chan<- int){
 	for url := range urlChan {
-		if uint64(max_occupy_mb * 1048576) < totalImgbytes {
+		if uint64(max_occupy_mb * 1048576) < totalImgbytes || goingToStop == true {
 			signal := syscall.Signal(2)
 			shutdownsign <- signal
 			resChan <- 9
+			continue
 		}
 		resChan <- downLoadImages(url)	
 	}
@@ -105,35 +106,34 @@ func updateTotalSize(addBytes uint64){
 	updataSizeMutex.Unlock()
 }
 
-
-//extract the url from a tag
+//extract and refix the url from a tag
 func getHref(aTag string, basehref string)string{
 	hrefReg,_ := regexp.Compile(`href="[^"]*`)
 	url := hrefReg.FindString(aTag)
-	if len(url)<7 {
+	if len(url)<7 {		
 		return ""
 	}
-	url = url[6:]
-	if len(url) < 5 {
+	url = url[6:]		//erase 'href="'
+	if len(url) < 2 {
 		return ""
 	}
-	if strings.HasPrefix(url, "http"){
+	if strings.HasPrefix(url, "http"){	
 		return strings.TrimRight(url, `/`)
 	}
-	if strings.HasPrefix(url, `//`) {
+	if strings.HasPrefix(url, `//`) {				// "//aa" -> http：//aa
 		url = `http:` + url
-	}else {
-		tindex := strings.Index(basehref, "?")
+	}else {											//such as "/aa" or "aa"  such append to basehref
+		tindex := strings.Index(basehref, "?")		// www.baidu.com/asdfad?index=...? 
 		if tindex > 0 {
-			basehref = basehref[:tindex]
+			basehref = basehref[:tindex]			// www.baidu.com/aadsfd
 		}
-		tindex = strings.LastIndex(basehref,`/`)
+		tindex = strings.LastIndex(basehref,`/`)	
 		if tindex > 0 {
-			basehref = basehref[:tindex]
+			basehref = basehref[:tindex]			// www.baudu.com/
 			basehref = strings.TrimRight(basehref, `/`)
 		}
 		if url[0] != '/' {
-			url = "/" +url
+			url = "/" + url
 		}
 		url = basehref + url
 	}
@@ -141,15 +141,12 @@ func getHref(aTag string, basehref string)string{
 	return url
 }
 
-//check if the url can be used or not
+//can use mean the url format is right, have specified prefix, and not yet read before
 func canUse(url string) bool{
 	if !strings.HasPrefix(url, "http") {
 		return false
 	}
 	if url_prefix != "" && !strings.HasPrefix(url, url_prefix){
-		return false
-	}
-	if url_must_contain != "" && strings.Index(url, url_must_contain)<0 {
 		return false
 	}
 	identi := getUrlPath(url)
@@ -161,6 +158,22 @@ func canUse(url string) bool{
 	return true
 }
 
+//judge if an url contain url_must_contain according to config
+func hasKey(rightUrl string) bool {
+	if url_must_contain != "" {
+		return true
+	}
+	return strings.Index(rightUrl, url_must_contain) >= 0
+}
+
+//if the url can be used and get true after it function, it should be a change page link
+func isPageUrl(rightUrl string) bool {
+	if url_nextpage == "" {
+		return false
+	}
+	return strings.Index(rightUrl, url_nextpage) >= 0
+}
+
 //avoid visit a same path with different url
 func getUrlPath(url string) string{
 	tindex := strings.Index(url, ":")
@@ -168,3 +181,5 @@ func getUrlPath(url string) string{
 	url = strings.Trim(url, `/`)
 	return url
 }
+
+

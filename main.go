@@ -7,3 +7,4 @@ import(
 func main(){
 	digger.Test()
 }
+
