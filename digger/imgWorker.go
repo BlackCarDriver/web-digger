@@ -11,10 +11,69 @@ import(
 	"strings"
 	"strconv"
 	"syscall"
+	"sync"
 )
 
+//find img url from html code and download some of then according to the config 
+func digAndSaveImgs(url string) {
+	//get all img link from html code
+	html,err := digHtml(url)
+	if err != nil {
+		fmt.Println(err)
+		fmt.Println()
+	}
+	reg1, _ := regexp.Compile(`<img [^>]*>`) 
+	imgTags := reg1.FindAllString(html, -1)
+	imgSlice := make([]string,0)
+	for _,j := range imgTags {
+		imgSlice = append(imgSlice, getImgSlice(j, url)...) 
+	}
+	if len(imgSlice) == 0 {
+		return
+	}
+	
+	fmt.Printf("url     [  %s  ]\n", url)
+	fmt.Printf("<img>   [  %-6d  ]\n", len(imgSlice))
+		
+	//create some goroutine and distribute the workes
+	urlChan := make(chan string, 100)
+	resChan := make(chan int, 20)
+	for i:=0; i<thread_numbers; i++ {
+		go imgDownLoader(i, urlChan, resChan)
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go showResult(len(imgSlice), resChan, &wg)
+	for _,j := range imgSlice {		//begin to download images
+		urlChan <- j
+	}
+	//wait for images download complete
+	wg.Wait()
+	close(urlChan)
+	close(resChan)
+}
 
+//display the result of images download goroutine
+//called by digAndSaveImgs()
+func showResult(times int, res <-chan int, wg *sync.WaitGroup){
+	counter := 0
+	for tres :=  range res {
+		counter ++
+		fmt.Print(tres," ")
+		if counter == times {
+			fmt.Println()
+			fmt.Printf("QueLen [ %-6d]    Pages [ %-6d]    ImgNum [ %-6d]    ImgSize [ %-6d]  \n\n\n", mylist.Len(), pagesNumber, imgNumbers, totalImgbytes/1048576 )
+			wg.Done()
+			return
+		}
+		if (counter%50) == 0 {
+			fmt.Println()
+		}
+	}
+}
 
+//used to distribute download_workes for mutil goroutine
+//called by digAndSaveImgs()
 func imgDownLoader(no int, urlChan <-chan string , resChan chan<- int){
 	for url := range urlChan {
 		if uint64(max_occupy_mb * 1048576) < totalImgbytes || goingToStop == true {
@@ -27,7 +86,8 @@ func imgDownLoader(no int, urlChan <-chan string , resChan chan<- int){
 	}
 }
 
-//download an image from imgurl
+//download an image specied by url
+//called by imgDownLoader
 func downLoadImages(imgUrl string)int{
 	if !isImgUrl(imgUrl) {
 		return 1
@@ -66,20 +126,8 @@ func downLoadImages(imgUrl string)int{
 	return 0
 }
 
-//find all image url from an img tag
-func getImgSlice(imgTag string, basehref string)[]string{
-	imgReg, _ := regexp.Compile(`="[^ ]*.(jpg|png|jpeg|gif){1}"`)
-	urls := imgReg.FindAllString(imgTag, -1)
-	for i:=0; i< len(urls); i++ {
-		urls[i] = urls[i][2 : len(urls[i])-1]
-		if strings.HasPrefix(urls[i], `//`) {
-			urls[i] = "http:" + urls[i]
-		}else if strings.HasPrefix(urls[i], `/`){
-			urls[i] = basehref + urls[i]
-		}
-	}
-	return urls
-}
+
+//=============================== the following is tools functions ================================
 
 //get a file name for download images
 func getName(name string) string{
@@ -105,81 +153,4 @@ func updateTotalSize(addBytes uint64){
 	totalImgbytes += addBytes
 	updataSizeMutex.Unlock()
 }
-
-//extract and refix the url from a tag
-func getHref(aTag string, basehref string)string{
-	hrefReg,_ := regexp.Compile(`href="[^"]*`)
-	url := hrefReg.FindString(aTag)
-	if len(url)<7 {		
-		return ""
-	}
-	url = url[6:]		//erase 'href="'
-	if len(url) < 2 {
-		return ""
-	}
-	if strings.HasPrefix(url, "http"){	
-		return strings.TrimRight(url, `/`)
-	}
-	if strings.HasPrefix(url, `//`) {				// "//aa" -> http：//aa
-		url = `http:` + url
-	}else {											//such as "/aa" or "aa"  such append to basehref
-		tindex := strings.Index(basehref, "?")		// www.baidu.com/asdfad?index=...? 
-		if tindex > 0 {
-			basehref = basehref[:tindex]			// www.baidu.com/aadsfd
-		}
-		tindex = strings.LastIndex(basehref,`/`)	
-		if tindex > 0 {
-			basehref = basehref[:tindex]			// www.baudu.com/
-			basehref = strings.TrimRight(basehref, `/`)
-		}
-		if url[0] != '/' {
-			url = "/" + url
-		}
-		url = basehref + url
-	}
-	url = strings.TrimRight(url, `/`)
-	return url
-}
-
-//can use mean the url format is right, have specified prefix, and not yet read before
-func canUse(url string) bool{
-	if !strings.HasPrefix(url, "http") {
-		return false
-	}
-	if url_prefix != "" && !strings.HasPrefix(url, url_prefix){
-		return false
-	}
-	identi := getUrlPath(url)
-	if url_map[identi] {
-		return false
-	}else{
-		url_map[identi] = true
-	}
-	return true
-}
-
-//judge if an url contain url_must_contain according to config
-func hasKey(rightUrl string) bool {
-	if url_must_contain != "" {
-		return true
-	}
-	return strings.Index(rightUrl, url_must_contain) >= 0
-}
-
-//if the url can be used and get true after it function, it should be a change page link
-func isPageUrl(rightUrl string) bool {
-	if url_nextpage == "" {
-		return false
-	}
-	return strings.Index(rightUrl, url_nextpage) >= 0
-}
-
-//avoid visit a same path with different url
-func getUrlPath(url string) string{
-	tindex := strings.Index(url, ":")
-	url = url[tindex+1:]
-	url = strings.Trim(url, `/`)
-	return url
-}
-
 

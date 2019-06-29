@@ -2,9 +2,7 @@ package digger
 
 import(
 	"fmt"
-	"io/ioutil"
 	"net/http"
-	"regexp"
 	"sync"
 	"math/rand"
 	"time"
@@ -140,17 +138,12 @@ func Test(){
 		break
 
 	case "forward":
-		basehref := `http://pic.netbian.com/tupian/%d.html`
-		startIndx := 14335
-		endIndex :=  24335
-		for i:= startIndx; i<=endIndex; i++ {
-			tmpUrl := fmt.Sprintf(basehref, i)
-			digAndSaveImgs(tmpUrl)
-		}  
+		forwardDig()
 	}
 
-	shutdownsign <-syscall.Signal(2)
-	time.Sleep(time.Second * 60)
+	//wait for a while
+	shutdownsign <-syscall.Signal(2) 
+	time.Sleep(time.Second * 60) 
 }
 
 // breadth first dig
@@ -192,129 +185,20 @@ func bfDig(seed string){
 	}
 }
 
-
-//judge if a <a/> element have substring url_nextpage
-func isNextPage(atag string) bool {
-	if url_nextpage == "" {
-		return false
-	}
-	if strings.Index(atag, url_nextpage) < 0  {
-		return false
-	}
-	return true
+// specially use to dig some regular change url
+func forwardDig(){
+	basehref := `http://www.netbian.com/meinv/index_%d.htm`
+		startIndx := 0
+		endIndex :=  203
+		for i:= startIndx; i<=endIndex; i++ {
+			tmpUrl := fmt.Sprintf(basehref, i)
+			digAndSaveImgs(tmpUrl)
+			pagesNumber ++
+			if goingToStop {
+				break
+			}
+		}  
 }
-//judge if a <a/> element have substring url_must_contain
-func isContain(atag string) bool {
-	if url_must_contain == "" {
-		return true
-	}
-	if strings.Index(atag, url_must_contain) < 0  {
-		return false
-	}
-	return true
-}
-
-//visit an url and get the html code
-func digHtml(url string)(html string, err error){
-	resp, err := mainClient.Get(url)
-	if err != nil {
-		return "",err
-	}
-	body, _ := ioutil.ReadAll(resp.Body)
-	html = string(body)
-	return html, err
-}
-
-//find img url from html code and download some of then according to the config 
-func digAndSaveImgs(url string) {
-	//get all img link from html code
-	html,err := digHtml(url)
-	if err != nil {
-		fmt.Println(err)
-		fmt.Println()
-	}
-	reg1, _ := regexp.Compile(`<img [^>]*>`) 
-	imgTags := reg1.FindAllString(html, -1)
-	imgSlice := make([]string,0)
-	for _,j := range imgTags {
-		imgSlice = append(imgSlice, getImgSlice(j, url)...) 
-	}
-	if len(imgSlice) == 0 {
-		return
-	}
-	
-	fmt.Printf("url     [  %s  ]\n", url)
-	fmt.Printf("<img>   [  %-6d  ]\n", len(imgSlice))
-		
-	//create some goroutine and distribute the workes
-	urlChan := make(chan string, 100)
-	resChan := make(chan int, 20)
-	for i:=0; i<thread_numbers; i++ {
-		go imgDownLoader(i, urlChan, resChan)
-	}
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go showResult(len(imgSlice), resChan, &wg)
-	for _,j := range imgSlice {		//begin to download images
-		urlChan <- j
-	}
-	//wait for images download complete
-	wg.Wait()
-	close(urlChan)
-	close(resChan)
-}
-
-//display the result of images download goroutine
-//called by digAndSaveImgs()
-func showResult(times int, res <-chan int, wg *sync.WaitGroup){
-	counter := 0
-	for tres :=  range res {
-		counter ++
-		fmt.Print(tres," ")
-		if counter == times {
-			fmt.Println()
-			fmt.Printf("QueLen [ %-6d]    Pages [ %-6d]    ImgNum [ %-6d]    ImgSize [ %-6d]  \n\n\n", mylist.Len(), pagesNumber, imgNumbers, totalImgbytes/1048576 )
-			wg.Done()
-			return
-		}
-		if (counter%50) == 0 {
-			fmt.Println()
-		}
-	}
-}
-
-func digAtags(url string)[]string{
-	html, err := digHtml(url)
-	if err!=nil {
-		fmt.Println(err)
-		return make([]string, 0)
-	}
-	//extract  <a/> tag from html code
-	aReg,_ := regexp.Compile(`<a [^>]*>`)
-	return aReg.FindAllString(html, -1)
-}
-
-//dig all can_be_used_url from an html text according to the config
-func DigUrl(url string) []string {
-	//get a tag text from html code
-	aTags := digAtags(url)
-	newUrls := make([]string, 0)
-	if len(aTags)==0 {
-		return newUrls
-	}
-	//extract usefully url from <a/>
-	for _, a := range aTags {
-		aurl := getHref(a, url)
-		if !canUse(aurl) { 	//synax not right or already meet before or out of basehref
-			if aurl != "" {
-				errLog.Println(aurl)
-			}		
-			continue
-		}
-		newUrls = append(newUrls, aurl)
-	}
-	return newUrls
-} 
 
 
 //giving a little time to downloaders before shut down the program 
