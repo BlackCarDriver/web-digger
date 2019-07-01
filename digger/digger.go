@@ -1,6 +1,7 @@
 package digger
 
 import(
+	"github.com/BlackCarDriver/config"
 	"fmt"
 	"net/http"
 	"sync"
@@ -11,6 +12,7 @@ import(
 	"container/list"
 	"log"
 	"syscall"
+	"strconv"
 )
 
 const(
@@ -66,7 +68,7 @@ func init(){
 	getNameMutex = &sync.Mutex{}
 	updataSizeMutex = &sync.Mutex{}
 
-	conf ,err := NewConfig(config_path)
+	conf ,err := config.NewConfig(config_path)
 	if err != nil {
 		panic(err)
 	} 
@@ -187,11 +189,13 @@ func bfDig(seed string){
 
 // specially use to dig some regular change url
 func forwardDig(){
-	basehref := `http://www.netbian.com/meinv/index_%d.htm`
-		startIndx := 0
-		endIndex :=  203
-		for i:= startIndx; i<=endIndex; i++ {
-			tmpUrl := fmt.Sprintf(basehref, i)
+	basehref := `http://tieba.baidu.com/f?kw=%E6%A0%A1%E8%8A%B1&ie=utf-8&pn=`
+		startIndx := 22050
+		gap := 50
+		endIndex :=  314400
+		for i := startIndx; i <= endIndex; i += gap {
+			//tmpUrl := fmt.Sprintf(basehref, i)
+			tmpUrl := basehref + strconv.Itoa(i)
 			digAndSaveImgs(tmpUrl)
 			pagesNumber ++
 			if goingToStop {
