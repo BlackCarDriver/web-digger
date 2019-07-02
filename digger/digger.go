@@ -48,9 +48,8 @@ var (
 	max_occupy_mb int
 	max_pages_number int
 	travel_method string
-	url_prefix	string
-	url_must_contain string
-	url_nextpage string
+	target_tag string
+	page_tag string
 	max_wait_time_s int
 	sleep_time_s	int
 )
@@ -82,11 +81,10 @@ func init(){
 	conf.Register("travel_method", "bfs", false)
 	conf.Register("max_pages_number", 50, false)
 	conf.Register("url_list", make([]string,0), false)
-	conf.Register("url_prefix", "", false)
-	conf.Register("url_must_contain", "", false)
+	conf.Register("target_tag", "", false)
 	conf.Register("max_wait_time_s", 10, false)
 	conf.Register("sleep_time_s", 0, false)
-	conf.Register("url_nextpage", "", false)
+	conf.Register("page_tag", "", false)
 	source_path, _ = conf.GetString("source_path")
 	log_path, _ = conf.GetString("log_path")
 	thread_numbers,_ = conf.GetInt("thread_numbers")
@@ -97,9 +95,8 @@ func init(){
 	travel_method, _ = conf.GetString("travel_method")
 	max_pages_number, _ = conf.GetInt("max_pages_number")
 	url_list, _ = conf.GetStrings("url_list")
-	url_prefix, _ = conf.GetString("url_prefix")
-	url_nextpage, _  = conf.GetString("url_nextpage")
-	url_must_contain, _ = conf.GetString("url_must_contain")
+	page_tag, _  = conf.GetString("page_tag")
+	target_tag, _ = conf.GetString("target_tag")
 	max_wait_time_s, _ = conf.GetInt("max_wait_time_s")
 	sleep_time_s,_ = conf.GetInt("sleep_time_s")
 	//conf.display()
@@ -120,7 +117,9 @@ func init(){
 }
 
 
-func Test(){
+func Run(){
+	//test()
+	
 	go destructor()
 
 	switch travel_method {
@@ -136,7 +135,7 @@ func Test(){
 	case "bfd":	
 		bfDig(url_seed)
 
-	case "dfs":
+	case "dfd":
 		break
 
 	case "forward":
@@ -166,19 +165,19 @@ func bfDig(seed string){
 		for _, atag := range allATags {
 			//extrat url and check whether can be used
 			href := getHref(atag, turl)
-			if !canUse(href) {
+			if !canUsed(href) {
 				if href != ""{
 					errLog.Println(href)
 				}
 				continue
 			}
 			//check which type it href is and do something
-			if isNextPage(atag){
+			if hasPageTag(atag){
 				mylist.PushBack(href)
 				urlLog.Printf("%d ---> %s", mylist.Len(), href)
 				continue
 			}
-			if isContain(atag) {
+			if hasTargetTag(atag) {
 				digAndSaveImgs(href)
 				pagesNumber ++
 				time.Sleep(time.Second * time.Duration(sleep_time_s))
@@ -189,7 +188,7 @@ func bfDig(seed string){
 
 // specially use to dig some regular change url
 func forwardDig(){
-	basehref := `http://tieba.baidu.com/f?kw=%E6%A0%A1%E8%8A%B1&ie=utf-8&pn=`
+	basehref := `https://tieba.baidu.com/id=`
 		startIndx := 22050
 		gap := 50
 		endIndex :=  314400
@@ -220,3 +219,10 @@ func destructor(){
 	os.Exit(1)
 }
 
+
+func test(){
+	target := "https://tieba.baidu.com"
+	html,_ := digHtml(target)
+	fmt.Println(html)
+	os.Exit(0)
+}

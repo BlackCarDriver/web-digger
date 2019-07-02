@@ -26,7 +26,7 @@ func digAndSaveImgs(url string) {
 	imgTags := reg1.FindAllString(html, -1)
 	imgSlice := make([]string,0)
 	for _,j := range imgTags {
-		imgSlice = append(imgSlice, getImgSlice(j, url)...) 
+		imgSlice = append(imgSlice, getImgUrls(j, url)...) 
 	}
 	if len(imgSlice) == 0 {
 		return

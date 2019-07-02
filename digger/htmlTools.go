@@ -6,34 +6,47 @@ import(
 	"regexp"
 	"strings"
 )
+ 
 
+//visit an url and get the html code
+func digHtml(url string)(html string, err error){ 
+	resp, err := mainClient.Get(url)
+	if err != nil {
+		return "",err
+	}
+	body, _ := ioutil.ReadAll(resp.Body)
+	html = string(body)
+	return html, err
+}
+ 
 //find all <a/> in a html code of specifed url
 func digAtags(url string)[]string{
 	html, err := digHtml(url)
+	res := make([]string, 0)
 	if err!=nil {
 		fmt.Println(err)
-		return make([]string, 0)
+		return res
 	}
 	//extract  <a/> tag from html code
 	aReg,_ := regexp.Compile(`<a [^>]*>`)
-	return aReg.FindAllString(html, -1)
+	res = aReg.FindAllString(html, -1)
+	return res
 }
 
-//dig all can_be_used_url from an html text according to the config
-func DigUrl(url string) []string {
+//find and select some url from an html text 
+//only right syntax url and frist_meet url would be returned
+func digLinkUrls(url string) []string {
 	//get a tag text from html code
 	aTags := digAtags(url)
 	newUrls := make([]string, 0)
 	if len(aTags)==0 {
 		return newUrls
 	}
-	//extract usefully url from <a/>
+	//extract some right and first_times_used url from <a/>
 	for _, a := range aTags {
 		aurl := getHref(a, url)
-		if !canUse(aurl) { 	//synax not right or already meet before or out of basehref
-			if aurl != "" {
-				errLog.Println(aurl)
-			}		
+		if !canUsed(aurl) { 	//synax not right or already check before or out of basehref
+			//errLog.Println(aurl)	
 			continue
 		}
 		newUrls = append(newUrls, aurl)
@@ -42,9 +55,13 @@ func DigUrl(url string) []string {
 } 
 
 //find all image url from an <img/>
-func getImgSlice(imgTag string, basehref string)[]string{
+func getImgUrls(imgTag string, basehref string)[]string{
 	imgReg, _ := regexp.Compile(`="[^ ]*.(jpg|png|jpeg|gif){1}"`)
 	urls := imgReg.FindAllString(imgTag, -1)
+	if len(urls)==0 {
+		imgTag = strings.Replace(imgTag, `'`, `"`, -1)
+		urls = imgReg.FindAllString(imgTag, -1)
+	}
 	for i:=0; i< len(urls); i++ {
 		urls[i] = urls[i][2 : len(urls[i])-1]
 		if strings.HasPrefix(urls[i], `//`) {
@@ -56,62 +73,7 @@ func getImgSlice(imgTag string, basehref string)[]string{
 	return urls
 }
 
-//can use mean the url format is right, have specified prefix, and not yet read before
-func canUse(url string) bool{
-	if !strings.HasPrefix(url, "http") {
-		return false
-	}
-	if url_prefix != "" && !strings.HasPrefix(url, url_prefix){
-		return false
-	}
-	identi := getUrlPath(url)
-	if url_map[identi] {
-		return false
-	}else{
-		url_map[identi] = true
-	}
-	return true
-}
-
-//judge if a <a/> element have substring url_nextpage
-func isNextPage(atag string) bool {
-	if url_nextpage == "" {
-		return false
-	}
-	if strings.Index(atag, url_nextpage) < 0  {
-		return false
-	}
-	return true
-}
-
-//judge if a <a/> element have substring url_must_contain
-func isContain(atag string) bool {
-	if url_must_contain == "" {
-		return true
-	}
-	if strings.Index(atag, url_must_contain) < 0  {
-		return false
-	}
-	return true
-}
-
-//judge if an url contain url_must_contain according to config
-func hasKey(rightUrl string) bool {
-	if url_must_contain != "" {
-		return true
-	}
-	return strings.Index(rightUrl, url_must_contain) >= 0
-}
-
-//if the url can be used and get true after it function, it should be a change page link
-func isPageUrl(rightUrl string) bool {
-	if url_nextpage == "" {
-		return false
-	}
-	return strings.Index(rightUrl, url_nextpage) >= 0
-}
-
-//extract and refix the url from a tag
+//extract and correct the url from a tag
 //called by digurl()
 func getHref(aTag string, basehref string)string{
 	hrefReg,_ := regexp.Compile(`href="[^"]*`)
@@ -147,7 +109,25 @@ func getHref(aTag string, basehref string)string{
 	return url
 }
 
-//avoid visit a same path with different url
+//=================== tools function place below =================================
+
+//return if a url is checked by it function before
+//if a url have a worng syntax will also return false
+func canUsed(url string) bool{
+	if !strings.HasPrefix(url, "http"){
+		return false
+	}
+	identi := getUrlPath(url)
+	if url_map[identi] {
+		return false
+	}else{
+		url_map[identi] = true
+	}
+	return true
+}
+
+//get a string to identified urls to same path 
+//called by wasUsed
 func getUrlPath(url string) string{
 	tindex := strings.Index(url, ":")
 	url = url[tindex+1:]
@@ -155,13 +135,23 @@ func getUrlPath(url string) string{
 	return url
 }
 
-//visit an url and get the html code
-func digHtml(url string)(html string, err error){
-	resp, err := mainClient.Get(url)
-	if err != nil {
-		return "",err
+
+func hasPageTag(atag string) bool {
+	if page_tag == "" {
+		return false
 	}
-	body, _ := ioutil.ReadAll(resp.Body)
-	html = string(body)
-	return html, err
+	if strings.Index(atag, page_tag) < 0  {
+		return false
+	}
+	return true
+}
+
+func hasTargetTag(atag string) bool {
+	if target_tag == "" {
+		return true
+	}
+	if strings.Index(atag, target_tag) < 0  {
+		return false
+	}
+	return true
 }
