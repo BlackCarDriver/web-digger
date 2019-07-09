@@ -14,6 +14,9 @@ func digHtml(url string)(html string, err error){
 	if err != nil {
 		return "",err
 	}
+	if resp.StatusCode != 200 {
+		return "",err
+	}
 	body, _ := ioutil.ReadAll(resp.Body)
 	html = string(body)
 	return html, err
@@ -56,7 +59,7 @@ func digLinkUrls(url string) []string {
 
 //find all image url from an <img/>
 func getImgUrls(imgTag string, basehref string)[]string{
-	imgReg, _ := regexp.Compile(`="[^ ]*.(jpg|png|jpeg|gif){1}"`)
+	imgReg, _ := regexp.Compile(`="[^ ]*.(jpg|png|jpeg){1}"`)
 	urls := imgReg.FindAllString(imgTag, -1)
 	if len(urls)==0 {
 		imgTag = strings.Replace(imgTag, `'`, `"`, -1)
@@ -107,6 +110,16 @@ func getHref(aTag string, basehref string)string{
 	}
 	url = strings.TrimRight(url, `/`)
 	return url
+}
+
+//to analyze which url can be visited
+func analyze(url string){
+	resp, err := mainClient.Get(url)
+	if err!=nil{
+		fmt.Println(err)
+		return
+	}
+	fmt.Printf("%s   ----------> %v \n",url,resp.Status)
 }
 
 //=================== tools function place below =================================

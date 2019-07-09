@@ -2,17 +2,16 @@ package digger
 
 import(
 	"github.com/BlackCarDriver/config"
+	"github.com/BlackCarDriver/log"
 	"fmt"
 	"net/http"
 	"sync"
 	"math/rand"
 	"time"
 	"os"
-	"strings"
 	"container/list"
-	"log"
 	"syscall"
-	"strconv"
+	//"strconv"
 )
 
 const(
@@ -27,7 +26,7 @@ var (
 	mainClient		http.Client
 	shutdownsign	chan os.Signal
 	urlLog			*log.Logger
-	errLog			*log.Logger
+	errLog			*log.Logger 
 	url_list		[]string	
 	goingToStop		bool
 	imgNumbers int		//how many images already download
@@ -71,20 +70,8 @@ func init(){
 	if err != nil {
 		panic(err)
 	} 
-	conf.Register("source_path", "", false)
-	conf.Register("log_path", "", false)
-	conf.Register("url_seed", "https://tieba.baidu.com", false )
-	conf.Register("thread_numbers", 1, false)
-	conf.Register("min_img_kb", 1, false)
-	conf.Register("max_img_mb", 10, false)
-	conf.Register("max_occupy_mb", 1000, false)
-	conf.Register("travel_method", "bfs", false)
-	conf.Register("max_pages_number", 50, false)
-	conf.Register("url_list", make([]string,0), false)
-	conf.Register("target_tag", "", false)
-	conf.Register("max_wait_time_s", 10, false)
-	conf.Register("sleep_time_s", 0, false)
-	conf.Register("page_tag", "", false)
+	conf.SetIsStrict(true)
+
 	source_path, _ = conf.GetString("source_path")
 	log_path, _ = conf.GetString("log_path")
 	thread_numbers,_ = conf.GetInt("thread_numbers")
@@ -99,27 +86,19 @@ func init(){
 	target_tag, _ = conf.GetString("target_tag")
 	max_wait_time_s, _ = conf.GetInt("max_wait_time_s")
 	sleep_time_s,_ = conf.GetInt("sleep_time_s")
-	//conf.display()
+	conf.Display()
 
 	mainClient = http.Client{
 		Timeout : time.Second * time.Duration(max_wait_time_s),
 	}
 
-	//init logger
-	log_path = strings.TrimRight(log_path, `\`)
-	logfp, err := os.Create(log_path + `\urlQueue.log`)
-	if err!=nil {
-		panic(err)
-	}
-	logfp2, _ := os.Create(log_path + `\error.log`)
-	urlLog = log.New(logfp, "", 0)
-	errLog = log.New(logfp2, "", 0)
+	log.SetLogPath("./log")
+	urlLog = log.NewLogger("url.log")
+	errLog = log.NewLogger("error.log")
 }
 
 
 func Run(){
-	//test()
-	
 	go destructor()
 
 	switch travel_method {
@@ -167,14 +146,14 @@ func bfDig(seed string){
 			href := getHref(atag, turl)
 			if !canUsed(href) {
 				if href != ""{
-					errLog.Println(href)
+					errLog.Write(href)
 				}
 				continue
 			}
 			//check which type it href is and do something
 			if hasPageTag(atag){
 				mylist.PushBack(href)
-				urlLog.Printf("%d ---> %s", mylist.Len(), href)
+				urlLog.Write("%d ---> %s", mylist.Len(), href)
 				continue
 			}
 			if hasTargetTag(atag) {
@@ -188,20 +167,22 @@ func bfDig(seed string){
 
 // specially use to dig some regular change url
 func forwardDig(){
-	basehref := `https://tieba.baidu.com/id=`
-		startIndx := 22050
-		gap := 50
-		endIndex :=  314400
+	basehref := ``
+		startIndx := 500
+		gap := 17
+		endIndex :=  999
 		for i := startIndx; i <= endIndex; i += gap {
-			//tmpUrl := fmt.Sprintf(basehref, i)
-			tmpUrl := basehref + strconv.Itoa(i)
-			digAndSaveImgs(tmpUrl)
+			tmpUrl := fmt.Sprintf(basehref, i)
+			//tmpUrl := basehref + strconv.Itoa(i)
+			//digAndSaveImgs(tmpUrl)
+			analyze(tmpUrl)
 			pagesNumber ++
 			if goingToStop {
 				break
 			}
 		}  
 }
+
 
 
 //giving a little time to downloaders before shut down the program 
@@ -221,7 +202,8 @@ func destructor(){
 
 
 func test(){
-	target := "https://tieba.baidu.com"
+	target := ""
+	digAndSaveImgs(target)
 	html,_ := digHtml(target)
 	fmt.Println(html)
 	os.Exit(0)

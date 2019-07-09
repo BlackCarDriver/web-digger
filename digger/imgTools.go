@@ -116,7 +116,7 @@ func downLoadImages(imgUrl string)int{
 	out, err := os.Create(imgPath)
 	defer out.Close()
 	if err != nil {
-		errLog.Printf("%s  ---->  %v \n", imgPath, err)
+		errLog.Write("%s  ---->  %v \n", imgPath, err)
 		return 7
 	}
 	_, err = io.Copy(out, bytes.NewReader(body))
